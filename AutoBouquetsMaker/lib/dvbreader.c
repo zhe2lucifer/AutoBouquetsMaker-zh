@@ -8,6 +8,216 @@
 
 #include <Python.h>
 
+#define HAVE_ALIAUI
+#ifdef HAVE_ALIAUI
+#include <aui_tsi.h>
+#include <aui_nim.h>
+#include <ali_basic_common.h>
+#include <ali_dmx_common.h>
+#include <ali_avsync_common.h>
+#include <sys/time.h>
+#include <unistd.h>
+#include <stdbool.h>
+
+typedef unsigned int uint32_t;
+typedef unsigned char uint8_t;
+static const uint32_t crc32_table[256] = {
+	0, 0x4C11DB7, 0x9823B6E, 0xD4326D9,
+	0x130476DC, 0x17C56B6B, 0x1A864DB2, 0x1E475005,
+	0x2608EDB8, 0x22C9F00F, 0x2F8AD6D6, 0x2B4BCB61,
+	0x350C9B64, 0x31CD86D3, 0x3C8EA00A, 0x384FBDBD,
+	0x4C11DB70, 0x48D0C6C7, 0x4593E01E, 0x4152FDA9,
+	0x5F15ADAC, 0x5BD4B01B, 0x569796C2, 0x52568B75,
+	0x6A1936C8, 0x6ED82B7F, 0x639B0DA6, 0x675A1011,
+	0x791D4014, 0x7DDC5DA3, 0x709F7B7A, 0x745E66CD,
+	0x9823B6E0, 0x9CE2AB57, 0x91A18D8E, 0x95609039,
+	0x8B27C03C, 0x8FE6DD8B, 0x82A5FB52, 0x8664E6E5,
+	0xBE2B5B58, 0xBAEA46EF, 0xB7A96036, 0xB3687D81,
+	0xAD2F2D84, 0xA9EE3033, 0xA4AD16EA, 0xA06C0B5D,
+	0xD4326D90, 0xD0F37027, 0xDDB056FE, 0xD9714B49,
+	0xC7361B4C, 0xC3F706FB, 0xCEB42022, 0xCA753D95,
+	0xF23A8028, 0xF6FB9D9F, 0xFBB8BB46, 0xFF79A6F1,
+	0xE13EF6F4, 0xE5FFEB43, 0xE8BCCD9A, 0xEC7DD02D,
+	0x34867077, 0x30476DC0, 0x3D044B19, 0x39C556AE,
+	0x278206AB, 0x23431B1C, 0x2E003DC5, 0x2AC12072,
+	0x128E9DCF, 0x164F8078, 0x1B0CA6A1, 0x1FCDBB16,
+	0x18AEB13, 0x54BF6A4, 0x808D07D, 0xCC9CDCA,
+	0x7897AB07, 0x7C56B6B0, 0x71159069, 0x75D48DDE,
+	0x6B93DDDB, 0x6F52C06C, 0x6211E6B5, 0x66D0FB02,
+	0x5E9F46BF, 0x5A5E5B08, 0x571D7DD1, 0x53DC6066,
+	0x4D9B3063, 0x495A2DD4, 0x44190B0D, 0x40D816BA,
+	0xACA5C697, 0xA864DB20, 0xA527FDF9, 0xA1E6E04E,
+	0xBFA1B04B, 0xBB60ADFC, 0xB6238B25, 0xB2E29692,
+	0x8AAD2B2F, 0x8E6C3698, 0x832F1041, 0x87EE0DF6,
+	0x99A95DF3, 0x9D684044, 0x902B669D, 0x94EA7B2A,
+	0xE0B41DE7, 0xE4750050, 0xE9362689, 0xEDF73B3E,
+	0xF3B06B3B, 0xF771768C, 0xFA325055, 0xFEF34DE2,
+	0xC6BCF05F, 0xC27DEDE8, 0xCF3ECB31, 0xCBFFD686,
+	0xD5B88683, 0xD1799B34, 0xDC3ABDED, 0xD8FBA05A,
+	0x690CE0EE, 0x6DCDFD59, 0x608EDB80, 0x644FC637,
+	0x7A089632, 0x7EC98B85, 0x738AAD5C, 0x774BB0EB,
+	0x4F040D56, 0x4BC510E1, 0x46863638, 0x42472B8F,
+	0x5C007B8A, 0x58C1663D, 0x558240E4, 0x51435D53,
+	0x251D3B9E, 0x21DC2629, 0x2C9F00F0, 0x285E1D47,
+	0x36194D42, 0x32D850F5, 0x3F9B762C, 0x3B5A6B9B,
+	0x315D626, 0x7D4CB91, 0xA97ED48, 0xE56F0FF,
+	0x1011A0FA, 0x14D0BD4D, 0x19939B94, 0x1D528623,
+	0xF12F560E, 0xF5EE4BB9, 0xF8AD6D60, 0xFC6C70D7,
+	0xE22B20D2, 0xE6EA3D65, 0xEBA91BBC, 0xEF68060B,
+	0xD727BBB6, 0xD3E6A601, 0xDEA580D8, 0xDA649D6F,
+	0xC423CD6A, 0xC0E2D0DD, 0xCDA1F604, 0xC960EBB3,
+	0xBD3E8D7E, 0xB9FF90C9, 0xB4BCB610, 0xB07DABA7,
+	0xAE3AFBA2, 0xAAFBE615, 0xA7B8C0CC, 0xA379DD7B,
+	0x9B3660C6, 0x9FF77D71, 0x92B45BA8, 0x9675461F,
+	0x8832161A, 0x8CF30BAD, 0x81B02D74, 0x857130C3,
+	0x5D8A9099, 0x594B8D2E, 0x5408ABF7, 0x50C9B640,
+	0x4E8EE645, 0x4A4FFBF2, 0x470CDD2B, 0x43CDC09C,
+	0x7B827D21, 0x7F436096, 0x7200464F, 0x76C15BF8,
+	0x68860BFD, 0x6C47164A, 0x61043093, 0x65C52D24,
+	0x119B4BE9, 0x155A565E, 0x18197087, 0x1CD86D30,
+	0x29F3D35, 0x65E2082, 0xB1D065B, 0xFDC1BEC,
+	0x3793A651, 0x3352BBE6, 0x3E119D3F, 0x3AD08088,
+	0x2497D08D, 0x2056CD3A, 0x2D15EBE3, 0x29D4F654,
+	0xC5A92679, 0xC1683BCE, 0xCC2B1D17, 0xC8EA00A0,
+	0xD6AD50A5, 0xD26C4D12, 0xDF2F6BCB, 0xDBEE767C,
+	0xE3A1CBC1, 0xE760D676, 0xEA23F0AF, 0xEEE2ED18,
+	0xF0A5BD1D, 0xF464A0AA, 0xF9278673, 0xFDE69BC4,
+	0x89B8FD09, 0x8D79E0BE, 0x803AC667, 0x84FBDBD0,
+	0x9ABC8BD5, 0x9E7D9662, 0x933EB0BB, 0x97FFAD0C,
+	0xAFB010B1, 0xAB710D06, 0xA6322BDF, 0xA2F33668,
+	0xBCB4666D, 0xB8757BDA, 0xB5365D03, 0xB1F740B4};
+
+static inline uint32_t
+crc32(uint32_t val, const void *ss, int len)
+{
+	const unsigned char *s =(const unsigned char *) ss;
+        while (--len >= 0)
+//                val = crc32_table[(val ^ *s++) & 0xff] ^ (val >> 8);
+                val = (val << 8) ^ crc32_table[(val >> 24) ^ *s++];
+        return val;
+}
+
+#define DMX_FILTER_SIZE   16
+struct ali_dmx_flt {
+	uint8_t filter_data [DMX_FILTER_SIZE];
+	uint8_t filter_mask [DMX_FILTER_SIZE];
+	uint8_t filter_mode [DMX_FILTER_SIZE];
+	int timeout;
+	int is_oneshot;
+};
+
+static bool section_hit(uint8_t *filter_data, uint8_t *filter_mask, uint8_t *filter_mode, uint8_t *buf)
+{
+	int i;
+	uint8_t filt, mask, mode, mode_r, value;
+	bool res1, res2, first;
+
+	/*
+	 * res1 is the check result of mode bits equal 1
+	 * res2 is the check result of mode bits equal 0
+	 * first is the check result of "is there any mode bits equal 0?"
+	 */
+	res1 = true;
+	res2 = true;
+	first = true;
+
+	for (i = 0; i < DMX_FILTER_SIZE; i++) {
+		filt  = filter_data[i];
+		mask  = filter_mask[i];
+		mode  = filter_mode[i];
+		mode_r = ~mode;
+		if (i == 0)
+			value = buf[i];
+		else
+			value = buf[i + 2];
+
+		mode  &= mask;
+		mode_r &= mask;
+
+		/*
+		 * for mode bits equal 1, all bits need to equal,
+		 * else section hit fail
+		 */
+		if ((mode & value) != (mode & filt))
+			res1 = false;
+
+		/*
+		 * This condition tells us there is at least one mode bit equel 0
+		 * else no mode bit equal 0, res2 must be "true"
+		 */
+		if (mode_r && first) {
+			res2 = false;
+			first = false;
+		}
+
+		/*
+		 * for mode bits equal 0, there should be at least one bit un-equal
+		 * else section hit fail unless no mode bit equal 0
+		 */
+		if ((mode_r & value) != (mode_r & filt))
+			res2 = true;
+	}
+
+	return (res1 && res2);
+}
+
+ssize_t ali_read(int fd, void *buf, size_t count, struct ali_dmx_flt *flt)
+{
+	int r;
+	unsigned int c;
+	struct timeval start, now;
+	int timeout;
+
+	gettimeofday(&start, 0);
+	for (;;) {
+		gettimeofday(&now, 0);
+		timeout = (now.tv_sec - start.tv_sec) * 1000;
+		timeout += ((now.tv_usec - start.tv_usec) / 1000);
+
+		if (timeout >= flt->timeout)
+			break;
+
+		r = read(fd, buf, count);
+		if(r < 0) {
+			usleep(1000);
+			continue;
+		}
+		if (!section_hit(flt->filter_data, flt->filter_mask, flt->filter_mode, (uint8_t *)buf))
+			continue;
+
+		if ((c = crc32((unsigned)-1, buf, r)))
+			continue;
+
+		return r;
+	}
+
+	return -1;
+}
+
+struct ali_dmx_flt g_ali_filter;
+
+struct ali_dmx_dev {
+	int dmx;
+	const char *dev;
+	const char *feeddev;
+};
+
+#define ALI_DMX_SEE_DEV "/dev/ali_m36_dmx_see_0"
+static struct ali_dmx_dev dmxdev[] = {
+	{0, "/dev/ali_m36_dmx_0", NULL},
+	{1, "/dev/ali_m36_dmx_1", NULL},
+	{2, "/dev/ali_m36_dmx_2", NULL},
+	{3, "/dev/ali_m36_dmx_3", NULL},
+	{4, "/dev/ali_m36_dmx_3", NULL},
+#define ALI_SW_DMX_IDX 5
+	{5, "/dev/ali_dmx_pb_0_out", "/dev/ali_dmx_pb_0_in"},
+};
+
+#endif
+
+
+
+
 /*
 	DMX_SET_SOURCE no longer exists. For more info check the following:
 	https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/include/uapi/linux/dvb/dmx.h?h=v4.17&id=13adefbe9e566c6db91579e4ce17f1e5193d6f2c
@@ -45,6 +255,7 @@ PyObject *ss_open(PyObject *self, PyObject *args) {
 
 	ssource = DMX_SOURCE_FRONT0 + frontend;
 
+#ifndef HAVE_ALIAUI
 	if ((fd = open(demuxer, O_RDWR | O_NONBLOCK)) < 0) {
 		printf("Cannot open demuxer '%s'", demuxer);
 		return Py_BuildValue("i", -1);
@@ -61,6 +272,119 @@ PyObject *ss_open(PyObject *self, PyObject *args) {
 		close(fd);
 		return Py_BuildValue("i", -1);
 	}
+#else
+	char *str_dmx;
+	int dvb_demux = 0;
+	str_dmx = demuxer + strlen(demuxer) -1;
+	dvb_demux = atoi(str_dmx);
+
+	if ((fd = open(dmxdev[dvb_demux].dev, O_RDONLY | O_NONBLOCK)) < 0) {
+		printf("Cannot open demuxer '%d'", dvb_demux);
+		return Py_BuildValue("i", -1);
+	}
+
+	aui_attr_tsi attr_tsi;
+	enum aui_tsi_input_id input_src;
+	unsigned long init_param;
+	enum aui_tsi_output_id tsi_output_id;
+	enum aui_tsi_channel_id tsi_channel_id;
+	int fenum, demux, is_sourcepvr;
+	aui_hdl hdl_tsi = NULL;
+
+	fenum = ssource;
+	demux = dvb_demux;
+	is_sourcepvr = 0;
+
+	memset(&attr_tsi, 0, sizeof(aui_attr_tsi));
+
+	if (fenum == 0) {
+	    init_param =  AUI_TSI_IN_CONF_SPI_ENABLE
+		| AUI_TSI_IN_CONF_SSI_BIT_ORDER
+		| AUI_TSI_IN_CONF_SYNC_SIG_POL
+		| AUI_TSI_IN_CONF_VALID_SIG_POL;
+	    input_src = AUI_TSI_INPUT_SPI_3;
+	    printf("[eDVBDemux] fenum 0 \n");
+	} else if (fenum == 1) {
+	    init_param = AUI_TSI_IN_CONF_SSI2B_ENABLE
+		| AUI_TSI_IN_CONF_SSI_CLOCK_POL
+		| AUI_TSI_IN_CONF_SSI_BIT_ORDER
+		| AUI_TSI_IN_CONF_ERR_SIG_POL
+		| AUI_TSI_IN_CONF_SYNC_SIG_POL
+		| AUI_TSI_IN_CONF_VALID_SIG_POL;
+	    input_src = AUI_TSI_INPUT_SSI2B_3;
+	    printf("[eDVBDemux] fenum 1 \n");
+	}
+
+	if (demux == 0)
+	{
+	    tsi_output_id = AUI_TSI_OUTPUT_DMX_0;
+	    tsi_channel_id = AUI_TSI_CHANNEL_0;
+	}
+	else if (demux == 1)
+	{
+	    tsi_output_id = AUI_TSI_OUTPUT_DMX_1;
+	    tsi_channel_id = AUI_TSI_CHANNEL_1;
+	}
+	else if (demux == 2)
+	{
+	    tsi_output_id = AUI_TSI_OUTPUT_DMX_2;
+	    tsi_channel_id = AUI_TSI_CHANNEL_2;
+	}
+	else if (demux == 3)
+	{
+	    tsi_output_id = AUI_TSI_OUTPUT_DMX_3;
+	    tsi_channel_id = AUI_TSI_CHANNEL_3;
+	}
+	else if (demux == 4)
+	{
+	    tsi_output_id = AUI_TSI_OUTPUT_DMX_3;
+	    tsi_channel_id = AUI_TSI_CHANNEL_3;
+	}
+
+	attr_tsi.ul_init_param = init_param;
+	if (aui_find_dev_by_idx(AUI_MODULE_TSI, 0, &hdl_tsi))
+	{
+	    if (aui_tsi_open(&hdl_tsi))
+	    {
+		printf("[eDVBDemux] aui_tsi_open error \n");
+		return Py_BuildValue("i", -1);
+	    }
+	}
+
+	if (aui_tsi_src_init(hdl_tsi, input_src, &attr_tsi)) {
+	    printf("[eDVBDemux] aui_tsi_src_init error \n");
+	    return Py_BuildValue("i", -1);
+	}
+
+	if (aui_tsi_route_cfg(hdl_tsi, input_src, tsi_channel_id, tsi_output_id)) {
+	    printf("[eDVBDemux] aui_tsi_route_cfg error \n");
+	    return Py_BuildValue("i", -1);
+	}
+	printf("[eDVBDemux] DMX_SET_SOURCE Frontend%d success \n", fenum);
+
+	struct dmx_channel_param param;
+	memset(&param, 0, sizeof(param));
+	param.output_space = DMX_OUTPUT_SPACE_USER;
+	param.output_format = DMX_CHANNEL_OUTPUT_FORMAT_SEC;
+	param.sec_param.pid = pid & 0xffff;
+	param.sec_param.mask_len = 1;
+	param.sec_param.mask[0] = 0;
+	param.sec_param.value[0] = 0;
+	param.sec_param.timeout = 5000;
+	param.sec_param.option = 0;
+	param.sec_param.needdiscramble = 0; /* Clear stream */
+
+	memset(&g_ali_filter, 0, sizeof(g_ali_filter));
+	g_ali_filter.filter_data[0] = filter & 0xff;;
+	g_ali_filter.filter_mask[0] = mask & 0xff;
+	g_ali_filter.timeout = 0;
+	g_ali_filter.is_oneshot = 1;
+	for (int i = 0; i < DMX_FILTER_SIZE; i++) {
+		g_ali_filter.filter_mode[i] = ~(g_ali_filter.filter_mode[i]);
+	}
+
+	ioctl(fd, ALI_DMX_CHANNEL_START, &param);
+#endif
 
 	return Py_BuildValue("i", fd);
 }
@@ -1136,7 +1460,14 @@ PyObject *ss_read_ts(PyObject *self, PyObject *args) { // for table dump
 	if (!PyArg_ParseTuple(args, "ibb", &fd, &table_id_current, &table_id_other))
 		return Py_None;
 
+#ifndef HAVE_ALIAUI
 	int size = read(fd, buffer, sizeof(buffer));
+#else
+	int size = ali_read(fd, buffer, sizeof(buffer), &g_ali_filter);
+#endif
+
+
+
 	if (size < 3)
 		return Py_None;
 
@@ -1163,7 +1494,11 @@ PyObject *ss_read_bat(PyObject *self, PyObject *args) {
 	if (!PyArg_ParseTuple(args, "ib", &fd, &table_id))
 		return Py_None;
 
+#ifndef HAVE_ALIAUI
 	int size = read(fd, buffer, sizeof(buffer));
+#else
+	int size = ali_read(fd, buffer, sizeof(buffer), &g_ali_filter);
+#endif
 	if (size < 3)
 		return Py_None;
 
@@ -1194,8 +1529,11 @@ PyObject *ss_read_sdt(PyObject *self, PyObject *args) {
 
 	if (!PyArg_ParseTuple(args, "ibb", &fd, &table_id_current, &table_id_other))
 		return Py_None;
-
+#ifndef HAVE_ALIAUI
 	int size = read(fd, buffer, sizeof(buffer));
+#else
+	int size = ali_read(fd, buffer, sizeof(buffer), &g_ali_filter);
+#endif
 	if (size < 3)
 		return Py_None;
 
@@ -1226,8 +1564,11 @@ PyObject *ss_read_fastscan(PyObject *self, PyObject *args) {
 
 	if (!PyArg_ParseTuple(args, "ib", &fd, &table_id))
 		return Py_None;
-
+#ifndef HAVE_ALIAUI
 	int size = read(fd, buffer, sizeof(buffer));
+#else
+	int size = ali_read(fd, buffer, sizeof(buffer), &g_ali_filter);
+#endif
 	if (size < 3)
 		return Py_None;
 
@@ -1258,8 +1599,11 @@ PyObject *ss_read_nit(PyObject *self, PyObject *args) {
 
 	if (!PyArg_ParseTuple(args, "ibb", &fd, &table_id_current, &table_id_other))
 		return Py_None;
-
+#ifndef HAVE_ALIAUI
 	int size = read(fd, buffer, sizeof(buffer));
+#else
+	int size = ali_read(fd, buffer, sizeof(buffer), &g_ali_filter);
+#endif
 	if (size < 3)
 		return Py_None;
 
